@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Configurar edición</title>
+<style>
+:root{--bg:#6DCBEF;--ink:#0B2533;--ink-2:#1D4357;--line:#BFE3F2;--accent:#007A68;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,"Segoe UI",sans-serif;padding:28px max(16px,env(safe-area-inset-left,0px))}
+main{max-width:640px;margin:0 auto;background:#fff;border-radius:18px;padding:24px;display:flex;flex-direction:column;gap:14px}
+h1{margin:0;color:#00876F;font-size:26px}
+p{margin:0}.muted{color:var(--ink-2);font-size:14.5px}
+label{display:flex;flex-direction:column;gap:4px;font-weight:700;font-size:14px;color:var(--ink-2)}
+input,textarea{font:inherit;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 10px;width:100%;background:#F7FBFD}
+textarea{min-height:140px;font-family:ui-monospace,monospace;font-size:12.5px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media (max-width:560px){.row{grid-template-columns:1fr}}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;background:var(--accent);color:#fff;cursor:pointer}
+button.sec{background:#fff;color:var(--ink);border:1px solid var(--line)}
+#m{font-size:14.5px}.err{color:#B3261E}.ok{color:var(--accent)}
+fieldset{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+legend{font-weight:700;padding:0 6px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Configurar la edición del sitio</h1>
+  <p class="muted">Esta página genera el archivo <b>edicion.json</b>. Todo se procesa en este navegador: la llave de GitHub, el usuario y la contraseña no se envían a ningún lado. El archivo resultante guarda la llave cifrada, y solo se abre con el usuario y la contraseña que elijas.</p>
+  <fieldset><legend>Repositorio</legend>
+    <div class="row">
+      <label for="o">Usuario u organización de GitHub<input id="o" placeholder="mi-usuario"></label>
+      <label for="r">Nombre del repositorio<input id="r" placeholder="guias-pc-ia"></label>
+    </div>
+    <label for="b">Rama publicada<input id="b" value="main"></label>
+    <label for="t">Llave de escritura (token fine-grained de GitHub)<input id="t" type="password" autocomplete="off" placeholder="github_pat_…"></label>
+    <div><button class="sec" type="button" id="test">Probar la llave</button></div>
+  </fieldset>
+  <fieldset><legend>Acceso para editar</legend>
+    <label for="u">Usuario<input id="u" autocomplete="off"></label>
+    <div class="row">
+      <label for="p">Contraseña<input id="p" type="password" autocomplete="new-password"></label>
+      <label for="p2">Repetir contraseña<input id="p2" type="password" autocomplete="new-password"></label>
+    </div>
+  </fieldset>
+  <div><button type="button" id="go">Generar edicion.json</button></div>
+  <p id="m" role="status"></p>
+  <label for="out">Contenido de edicion.json<textarea id="out" readonly></textarea></label>
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="sec" type="button" id="dl" disabled>Descargar edicion.json</button><button class="sec" type="button" id="cp" disabled>Copiar</button></div>
+  <p class="muted">Subí edicion.json a la raíz del repositorio, junto a index.html. Cuando la llave venza, repetí estos pasos con una llave nueva.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id), m=$("m");
+const say=(t,c)=>{m.textContent=t;m.className=c||""};
+const b64=u=>{let s="";u.forEach(x=>s+=String.fromCharCode(x));return btoa(s)};
+async function check(){
+  const o=$("o").value.trim(),r=$("r").value.trim(),t=$("t").value.trim();
+  if(!o||!r||!t){say("Completá usuario u organización, repositorio y llave.","err");return false}
+  say("Probando la llave…");
+  try{
+    const res=await fetch(`https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`,{headers:{Authorization:`Bearer ${t}`,Accept:"application/vnd.github+json"}});
+    if(res.status===401){say("La llave no es válida o venció.","err");return false}
+    if(!res.ok){say("La llave no tiene acceso a ese repositorio (o el nombre está mal).","err");return false}
+    const j=await res.json();
+    if(!(j.permissions&&j.permissions.push)){say("La llave puede leer el repositorio pero no escribir. Dale permiso Contents: Read and write.","err");return false}
+    say("La llave funciona y puede escribir en el repositorio.","ok");return true;
+  }catch(e){say("No se pudo conectar con GitHub.","err");return false}
+}
+$("test").onclick=check;
+let blobUrl=null;
+$("go").onclick=async()=>{
+  const u=$("u").value.trim().toLowerCase(),p=$("p").value;
+  if(!u||!p){say("Completá usuario y contraseña.","err");return}
+  if(p!==$("p2").value){say("Las contraseñas no coinciden.","err");return}
+  if(p.length<12){say("Usá una contraseña de al menos 12 caracteres.","err");return}
+  if(!(await check()))return;
+  say("Cifrando… (tarda unos segundos)");
+  const enc=new TextEncoder(),iter=600000;
+  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  const km=await crypto.subtle.importKey("raw",enc.encode(u+"\n"+p),"PBKDF2",false,["deriveKey"]);
+  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["encrypt"]);
+  const payload={token:$("t").value.trim(),owner:$("o").value.trim(),repo:$("r").value.trim(),branch:$("b").value.trim()||"main"};
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(JSON.stringify(payload))));
+  const out=JSON.stringify({v:1,iter,salt:b64(salt),iv:b64(iv),data:b64(ct)},null,1);
+  $("out").value=out;$("dl").disabled=false;$("cp").disabled=false;
+  if(blobUrl)URL.revokeObjectURL(blobUrl);blobUrl=URL.createObjectURL(new Blob([out],{type:"application/json"}));
+  say("Listo. Descargá o copiá el archivo y subilo al repositorio.","ok");
+};
+$("dl").onclick=()=>{const a=document.createElement("a");a.href=blobUrl;a.download="edicion.json";a.click()};
+$("cp").onclick=async()=>{try{await navigator.clipboard.writeText($("out").value);say("Copiado.","ok")}catch(e){$("out").select()}};
+</script>
+</body>
+</html>
