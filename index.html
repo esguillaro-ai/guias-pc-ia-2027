@@ -170,7 +170,7 @@ button:disabled{opacity:.55;cursor:default}
 .fld{display:flex;flex-direction:column;gap:4px;min-width:0}
 .fld>span{font-size:13px;font-weight:700;color:var(--ink-2)}
 .fld small{font-weight:400;color:var(--ink-2)}
-.fld input,.fld textarea{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%;resize:vertical}
+.fld input,.fld textarea,.fld select{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%;resize:vertical}
 .fld textarea{min-height:76px;line-height:1.45}
 .fld.chk{flex-direction:row;align-items:center;gap:8px}
 .fld.chk input{width:auto}
@@ -292,6 +292,7 @@ window.addEventListener("hashchange",()=>{state.tab="resumen";state.editing=null
 function route(keepScroll){
   const id=location.hash.slice(1);
   document.body.classList.toggle("crono",id==="cronograma"||id.startsWith("cronograma-"));
+  if(id==="configurar"){renderSetup();if(!keepScroll)window.scrollTo(0,0);return}
   if(id==="acceso"){renderLogin();if(!keepScroll)window.scrollTo(0,0);return}
   if(id==="cronograma"||id.startsWith("cronograma-")){renderCrono(id.slice(11)||null);if(!keepScroll)window.scrollTo(0,0);return}
   const g=DATA.find(x=>x.id===id);
@@ -316,7 +317,7 @@ function renderCatalogo(){
   </div>
   <p class="count" id="count"></p>
   <div class="grid" id="grid"></div>
-  <p class="foot">${full} de ${DATA.length} propuestas tienen la secuencia completa cargada; el resto muestra la ficha y el enlace a la guía en PDF.${GH.cfg?` · <a href="#acceso">${GH.auth?"Edición activa":"Acceso para edición"}</a>`:""}</p>`;
+  <p class="foot">${full} de ${DATA.length} propuestas tienen la secuencia completa cargada; el resto muestra la ficha y el enlace a la guía en PDF.${` · <a href="#acceso">${GH.auth?"Edición activa ("+esc(GH.auth.name)+")":"Edición"}</a>`}</p>`;
   app.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{state[b.dataset.f]=b.dataset.v;renderCatalogo()});
   const q=document.getElementById("q");
   q.oninput=()=>{state.q=q.value;drawGrid()};
@@ -505,7 +506,7 @@ function editRow(g){
 }
 function bindEditRow(g){
   const b=document.getElementById("btn-edit"); if(!b)return;
-  b.onclick=()=>{state.editing={id:g.id,draft:JSON.parse(JSON.stringify(g.detalle||blankDetalle())),open:0,resp:(g.ed&&g.ed.name)||store("ed-resp")||""};renderEditor(g);window.scrollTo(0,0)};
+  b.onclick=()=>{state.editing={id:g.id,draft:JSON.parse(JSON.stringify(g.detalle||blankDetalle())),open:0,resp:(GH.auth&&GH.auth.name)||store("ed-resp")||""};renderEditor(g);window.scrollTo(0,0)};
 }
 function blankEtapa(){return {titulo:"Nueva etapa",concepto:"",sintesisAula:"",sintesisVC:"",objetivos:[],conjuntas:[],da:[],drNecesita:[],
   aula:{titulo:"",minimos:[],optimos:[],detalle:""},vc:{titulo:"",desafio:"",momentos:[{nombre:"Inicio",min:10,texto:""},{nombre:"Desarrollo",min:25,texto:""},{nombre:"Cierre",min:10,texto:""}]},registro:"",yapa:""}}
@@ -716,72 +717,185 @@ function enCrono(g){
   return out;
 }
 
-/* ---------- edición en GitHub Pages (usuario y contraseña) ---------- */
+/* ---------- edición: 3 usuarios, cada uno con su contraseña ----------
+   edicion.json guarda la llave de GitHub cifrada con una clave interna; esa clave
+   está a su vez cifrada con el usuario y la contraseña de cada persona.
+   En el sitio no hay contraseñas ni llaves legibles. */
+const USERS=["Enzo","Pedagogico","Ro"], ITER=600000;
+const REPO={owner:"esguillaro-ai",repo:"guias-pc-ia-2027",branch:"main"};
 const GH={cfg:null,auth:null};
-const b64bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-function b64utf8(str){const bytes=new TextEncoder().encode(str);let bin="";for(let i=0;i<bytes.length;i+=0x8000)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(bin)}
-function utf8b64(b){const bin=atob(b.replace(/\s/g,""));return new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0)))}
+const tenc=new TextEncoder(),tdec=new TextDecoder();
+const b64=u=>{const a=new Uint8Array(u);let s="";for(let i=0;i<a.length;i+=0x8000)s+=String.fromCharCode.apply(null,a.subarray(i,i+0x8000));return btoa(s)};
+const unb64=s=>Uint8Array.from(atob(s.replace(/\s/g,"")),c=>c.charCodeAt(0));
+const rnd=n=>crypto.getRandomValues(new Uint8Array(n));
+const b64utf8=str=>b64(tenc.encode(str)), utf8b64=s=>tdec.decode(unb64(s));
+async function pwKey(name,pass,salt,iter){
+  const km=await crypto.subtle.importKey("raw",tenc.encode(name.toLowerCase()+"\n"+pass),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+const aesKey=raw=>crypto.subtle.importKey("raw",raw,"AES-GCM",false,["encrypt","decrypt"]);
+async function seal(key,bytes){const iv=rnd(12);return {iv:b64(iv),ct:b64(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,bytes))}}
+async function unseal(key,o){return new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(o.iv)},key,unb64(o.ct)))}
+async function wrapUser(name,pass,K){const salt=rnd(16);return {salt:b64(salt),iter:ITER,...await seal(await pwKey(name,pass,salt,ITER),K)}}
+function saveSession(){try{GH.auth?sessionStorage.setItem("gh-auth",JSON.stringify(GH.auth)):sessionStorage.removeItem("gh-auth")}catch(e){}}
+try{const a=sessionStorage.getItem("gh-auth");if(a)GH.auth=JSON.parse(a)}catch(e){}
 fetch("edicion.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(c=>{
-  if(!c||!c.data)return; GH.cfg=c;
-  try{const a=sessionStorage.getItem("gh-auth");if(a)GH.auth=JSON.parse(a)}catch(e){}
+  if(c&&c.v===2&&c.users&&c.token)GH.cfg=c; else {GH.auth=null;saveSession()}
   if(!state.editing&&DATA.length)route(true);
 }).catch(()=>{});
-async function ghUnlock(user,pass){
-  const c=GH.cfg,enc=new TextEncoder();
-  const km=await crypto.subtle.importKey("raw",enc.encode(user.trim().toLowerCase()+"\n"+pass),"PBKDF2",false,["deriveKey"]);
-  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:b64bytes(c.salt),iterations:c.iter,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["decrypt"]);
-  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64bytes(c.iv)},key,b64bytes(c.data));
-  return JSON.parse(new TextDecoder().decode(pt));
+
+async function ghLogin(name,pass){
+  const c=GH.cfg, key=Object.keys(c.users).find(n=>n.toLowerCase()===name.trim().toLowerCase());
+  if(!key)throw {code:"cred"};
+  const u=c.users[key];
+  let K;try{K=await unseal(await pwKey(key,pass,unb64(u.salt),u.iter),u)}catch(e){throw {code:"cred"}}
+  const token=tdec.decode(await unseal(await aesKey(K),c.token));
+  return {name:key,token,K:b64(K),owner:c.owner,repo:c.repo,branch:c.branch};
+}
+async function ghCheck(token){
+  const r=await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}`,{headers:{Authorization:`Bearer ${token}`,Accept:"application/vnd.github+json"},cache:"no-store"});
+  if(!r.ok)throw {status:r.status};
+  const j=await r.json(); if(!(j.permissions&&j.permissions.push))throw {status:403};
+  return j.default_branch||REPO.branch;
+}
+const ghUrl=(a,path)=>`https://api.github.com/repos/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/contents/${path}`;
+const ghHead=a=>({Authorization:`Bearer ${a.token}`,Accept:"application/vnd.github+json"});
+async function ghGet(path,a=GH.auth){
+  const r=await fetch(ghUrl(a,path)+"?ref="+encodeURIComponent(a.branch),{headers:ghHead(a),cache:"no-store"});
+  if(r.status===404)return null; if(!r.ok)throw {status:r.status};
+  const j=await r.json(); return {sha:j.sha,text:utf8b64(j.content)};
+}
+async function ghPut(path,text,message,sha,a=GH.auth){
+  const body={message,content:b64utf8(text),branch:a.branch}; if(sha)body.sha=sha;
+  const r=await fetch(ghUrl(a,path),{method:"PUT",headers:{...ghHead(a),"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok)throw {status:r.status};
 }
 async function ghCommit(mutate,message){
-  const {token,owner,repo,branch}=GH.auth;
-  const api=`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/guias.json`;
-  const h={Authorization:`Bearer ${token}`,Accept:"application/vnd.github+json"};
-  const r=await fetch(api+"?ref="+encodeURIComponent(branch),{headers:h,cache:"no-store"});
-  if(!r.ok)throw {status:r.status};
-  const j=await r.json();
-  const arr=JSON.parse(utf8b64(j.content));
-  mutate(arr);
-  const p=await fetch(api,{method:"PUT",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({message,content:b64utf8(JSON.stringify(arr)),sha:j.sha,branch})});
-  if(!p.ok)throw {status:p.status};
+  const f=await ghGet("guias.json"); if(!f)throw {status:404};
+  const arr=JSON.parse(f.text); mutate(arr);
+  await ghPut("guias.json","[\n"+arr.map(x=>JSON.stringify(x)).join(",\n")+"\n]\n",message,f.sha);
+}
+async function saveCfg(cfg,message,a=GH.auth){
+  const cur=await ghGet("edicion.json",a);
+  await ghPut("edicion.json",JSON.stringify(cfg,null,1)+"\n",message,cur&&cur.sha,a);
+  GH.cfg=cfg;
 }
 function ghErr(e){
   const s=e&&e.status;
-  if(s===401)return "La llave de escritura venció o fue revocada. Hay que generar una nueva con configurar.html y subir el nuevo edicion.json.";
-  if(s===403||s===404)return "La llave de escritura no tiene permiso sobre el repositorio. Revisá la configuración.";
-  if(s===409)return "Alguien guardó al mismo tiempo. Volvé a intentar.";
+  if(s===401)return "La llave de GitHub venció o fue revocada. Renovala en Edición → Renovar la llave de GitHub.";
+  if(s===403||s===404)return "La llave de GitHub no tiene permiso para escribir en el repositorio.";
+  if(s===409||s===422)return "El archivo cambió mientras editabas. Volvé a intentar.";
   return "No se pudo guardar. Revisá la conexión y volvé a intentar.";
 }
 async function ghSave(g,d,resp){
   const pub={detalle:d,updatedAt:new Date().toISOString(),responsable:resp};
-  await ghCommit(arr=>{const x=arr.find(y=>y.id===g.id);if(x)x.publicado=pub},`Edición de ${g.nombre} por ${resp}`);
+  await ghCommit(arr=>{const x=arr.find(y=>y.id===g.id);if(!x)throw {status:0};x.publicado=pub},`Edición de ${g.nombre} por ${resp}`);
   g.publicado=pub;g.detalle=d;g.ed={at:pub.updatedAt,name:resp};
 }
 async function ghRestore(g){
-  await ghCommit(arr=>{const x=arr.find(y=>y.id===g.id);if(x)delete x.publicado},`Restaurar ${g.nombre} a la versión de la guía`);
+  await ghCommit(arr=>{const x=arr.find(y=>y.id===g.id);if(x)delete x.publicado},`Restaurar ${g.nombre} a la versión de la guía (${GH.auth.name})`);
   delete g.publicado;g.detalle=g.base;g.ed=null;
 }
+
+/* pantallas */
+const pwField=(id,label,ac="new-password")=>`<label class="fld" for="${id}"><span>${label}</span><input id="${id}" type="password" autocomplete="${ac}" required minlength="12"></label>`;
+const tokenHelp=`<details><summary>¿Cómo creo la llave de GitHub?</summary><ol class="list" style="margin-top:8px">
+  <li>En GitHub: tu foto → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.</li>
+  <li>Repository access: <b>Only select repositories</b> → ${REPO.owner}/${REPO.repo}.</li>
+  <li>Permissions → Repository permissions → <b>Contents: Read and write</b>.</li>
+  <li>Elegí el vencimiento más largo posible, generala y copiala.</li></ol></details>`;
+function setMsg(el,t,err){el.textContent=t;el.style.color=err?"#B3261E":"var(--accent)"}
+function checkPw(p1,p2){if(p1.length<12)return "La contraseña tiene que tener al menos 12 caracteres.";if(p1!==p2)return "Las contraseñas no coinciden.";return ""}
+
+function renderSetup(){
+  if(GH.cfg){app.innerHTML=`${viewNav("")}<section class="box" style="max-width:520px"><h2>La edición ya está configurada</h2><p>Ingresá con tu usuario en <a href="#acceso">Acceso para edición</a>. Desde ahí se cambian contraseñas y se renueva la llave.</p></section>`;return}
+  app.innerHTML=`${viewNav("")}<form class="box" id="su" style="max-width:600px">
+    <h2>Configurar la edición</h2>
+    <p class="muted">Se hace una sola vez. La llave de GitHub queda cifrada en el repositorio y solo se abre con alguno de los tres usuarios. Las contraseñas no se guardan en ningún lado.</p>
+    <label class="fld" for="su-t"><span>Llave de GitHub <small>empieza con github_pat_</small></span><input id="su-t" type="password" autocomplete="off" spellcheck="false" required></label>
+    ${tokenHelp}
+    ${USERS.map((u,i)=>`<fieldset class="box" style="padding:12px;gap:8px"><legend><b>${u}</b></legend><div class="ed-grid">${pwField("su-p"+i,"Contraseña")}${pwField("su-q"+i,"Repetir contraseña")}</div></fieldset>`).join("")}
+    <p class="muted" style="font-size:14px">Mínimo 12 caracteres cada una. Después cada persona puede cambiar la suya.</p>
+    <p id="su-m" role="status" style="font-size:14px"></p>
+    <div class="ed-tools"><button class="btn" type="submit" id="su-b">Guardar configuración</button><a class="btn-sec" href="#">Cancelar</a></div>
+  </form>`;
+  const f=document.getElementById("su"),m=document.getElementById("su-m"),b=document.getElementById("su-b");
+  f.onsubmit=async ev=>{ev.preventDefault();
+    const pw=USERS.map((u,i)=>[document.getElementById("su-p"+i).value,document.getElementById("su-q"+i).value]);
+    for(let i=0;i<USERS.length;i++){const e=checkPw(...pw[i]);if(e){setMsg(m,`${USERS[i]}: ${e}`,true);return}}
+    const token=document.getElementById("su-t").value.trim();
+    b.disabled=true;setMsg(m,"Verificando la llave…");
+    try{
+      const branch=await ghCheck(token);
+      setMsg(m,"Cifrando… (tarda unos segundos)");
+      const K=rnd(32),users={};
+      for(let i=0;i<USERS.length;i++)users[USERS[i]]=await wrapUser(USERS[i],pw[i][0],K);
+      const cfg={v:2,owner:REPO.owner,repo:REPO.repo,branch,users,token:await seal(await aesKey(K),tenc.encode(token))};
+      setMsg(m,"Guardando en el repositorio…");
+      await saveCfg(cfg,"Configurar la edición desde la web",{token,owner:REPO.owner,repo:REPO.repo,branch});
+      GH.auth=null;saveSession();
+      app.innerHTML=`${viewNav("")}<section class="box" style="max-width:520px"><h2>Listo</h2><p>La edición quedó configurada para ${USERS.join(", ")}. Ya pueden ingresar en <a href="#acceso">Acceso para edición</a>.</p></section>`;
+    }catch(e){b.disabled=false;setMsg(m,e&&e.status===401?"La llave no es válida o venció.":e&&(e.status===403||e.status===404)?"Esa llave no puede escribir en este repositorio.":"No se pudo guardar. Revisá la conexión.",true)}
+  };
+}
+
 function renderLogin(){
-  if(GH.auth){
-    app.innerHTML=`${viewNav("")}<section class="box" style="max-width:460px"><h2>Acceso para edición</h2><p>Ya ingresaste. En cada propuesta vas a ver el botón <b>Editar secuencia</b>.</p><div class="ed-tools"><a class="btn" href="#">Ir a las propuestas</a><button class="btn-sec" type="button" id="lg-out">Salir</button></div></section>`;
-    document.getElementById("lg-out").onclick=()=>{GH.auth=null;try{sessionStorage.removeItem("gh-auth")}catch(e){}location.hash="";};
-    return;
-  }
-  if(!GH.cfg){app.innerHTML=`${viewNav("")}<section class="box" style="max-width:460px"><h2>Acceso para edición</h2><p class="muted">La edición todavía no está configurada en este sitio.</p></section>`;return}
-  app.innerHTML=`${viewNav("")}<form class="box" id="lg" style="max-width:420px" autocomplete="on">
+  if(!GH.cfg){app.innerHTML=`${viewNav("")}<section class="box" style="max-width:520px"><h2>Acceso para edición</h2><p class="muted">La edición todavía no está configurada.</p><div class="ed-tools"><a class="btn" href="#configurar">Configurar la edición</a></div></section>`;return}
+  if(GH.auth){renderAdmin();return}
+  app.innerHTML=`${viewNav("")}<form class="box" id="lg" style="max-width:420px">
     <h2>Acceso para edición</h2>
-    <label class="fld" for="lg-u"><span>Usuario</span><input id="lg-u" type="text" autocomplete="username" required></label>
-    <label class="fld" for="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autocomplete="current-password" required></label>
+    <label class="fld" for="lg-u"><span>Usuario</span><select id="lg-u" required>${Object.keys(GH.cfg.users).map(n=>`<option>${esc(n)}</option>`).join("")}</select></label>
+    ${pwField("lg-p","Contraseña","current-password")}
     <p class="msg" id="lg-m" role="status" style="font-size:14px"></p>
     <div class="ed-tools"><button class="btn" type="submit" id="lg-b">Ingresar</button><a class="btn-sec" href="#">Cancelar</a></div>
   </form>`;
   const f=document.getElementById("lg"),m=document.getElementById("lg-m"),b=document.getElementById("lg-b");
-  f.onsubmit=async ev=>{ev.preventDefault();b.disabled=true;m.textContent="Verificando…";m.style.color="";
-    try{GH.auth=await ghUnlock(document.getElementById("lg-u").value,document.getElementById("lg-p").value);
-      try{sessionStorage.setItem("gh-auth",JSON.stringify(GH.auth))}catch(e){}
+  try{const last=localStorage.getItem("ed-user");if(last)document.getElementById("lg-u").value=last}catch(e){}
+  document.getElementById("lg-p").removeAttribute("minlength");
+  f.onsubmit=async ev=>{ev.preventDefault();b.disabled=true;setMsg(m,"Verificando…");
+    const u=document.getElementById("lg-u").value;
+    try{GH.auth=await ghLogin(u,document.getElementById("lg-p").value);saveSession();
+      try{localStorage.setItem("ed-user",GH.auth.name)}catch(e){}
       location.hash="";}
-    catch(e){b.disabled=false;m.textContent="Usuario o contraseña incorrectos.";m.style.color="#B3261E"}};
-  document.getElementById("lg-u").focus();
+    catch(e){b.disabled=false;setMsg(m,"Usuario o contraseña incorrectos.",true)}};
+  document.getElementById("lg-p").focus();
+}
+
+function renderAdmin(){
+  const names=Object.keys(GH.cfg.users);
+  app.innerHTML=`${viewNav("")}<div style="display:flex;flex-direction:column;gap:16px;max-width:600px">
+    <section class="box"><h2>Edición activa · ${esc(GH.auth.name)}</h2><p>En cada propuesta vas a ver el botón <b>Editar secuencia</b>. Al guardar, la web se actualiza en 1 o 2 minutos.</p>
+      <div class="ed-tools"><a class="btn" href="#">Ir a las propuestas</a><button class="btn-sec" type="button" id="lg-out">Salir de la edición</button></div></section>
+    <form class="box" id="cp"><h3>Cambiar una contraseña</h3>
+      <label class="fld" for="cp-u"><span>Usuario</span><select id="cp-u">${names.map(n=>`<option ${n===GH.auth.name?"selected":""}>${esc(n)}</option>`).join("")}</select></label>
+      <div class="ed-grid">${pwField("cp-p","Nueva contraseña")}${pwField("cp-q","Repetir contraseña")}</div>
+      <p id="cp-m" role="status" style="font-size:14px"></p>
+      <div><button class="btn-sec" type="submit">Cambiar contraseña</button></div></form>
+    <form class="box" id="rt"><h3>Renovar la llave de GitHub</h3>
+      <p class="muted">Solo hace falta cuando la llave vence. Los usuarios y las contraseñas no cambian.</p>
+      <label class="fld" for="rt-t"><span>Llave nueva</span><input id="rt-t" type="password" autocomplete="off" spellcheck="false" required></label>
+      ${tokenHelp}
+      <p id="rt-m" role="status" style="font-size:14px"></p>
+      <div><button class="btn-sec" type="submit">Guardar llave nueva</button></div></form>
+  </div>`;
+  document.getElementById("lg-out").onclick=()=>{GH.auth=null;saveSession();location.hash=""};
+  const K=unb64(GH.auth.K);
+  document.getElementById("cp").onsubmit=async ev=>{ev.preventDefault();const m=document.getElementById("cp-m"),btn=ev.target.querySelector("button");
+    const u=document.getElementById("cp-u").value,p=document.getElementById("cp-p").value,e=checkPw(p,document.getElementById("cp-q").value);
+    if(e){setMsg(m,e,true);return}
+    btn.disabled=true;setMsg(m,"Guardando…");
+    try{const cfg=JSON.parse(JSON.stringify(GH.cfg));cfg.users[u]=await wrapUser(u,p,K);
+      await saveCfg(cfg,`Cambio de contraseña de ${u} (por ${GH.auth.name})`);
+      ev.target.reset();setMsg(m,`Listo. La contraseña de ${u} cambia en 1 o 2 minutos.`)}
+    catch(err){setMsg(m,ghErr(err),true)} btn.disabled=false};
+  document.getElementById("rt").onsubmit=async ev=>{ev.preventDefault();const m=document.getElementById("rt-m"),btn=ev.target.querySelector("button");
+    const token=document.getElementById("rt-t").value.trim();btn.disabled=true;setMsg(m,"Verificando la llave…");
+    try{const branch=await ghCheck(token);
+      const cfg=JSON.parse(JSON.stringify(GH.cfg));cfg.branch=branch;cfg.token=await seal(await aesKey(K),tenc.encode(token));
+      const a={...GH.auth,token,branch};
+      await saveCfg(cfg,`Renovar la llave de GitHub (por ${GH.auth.name})`,a);
+      GH.auth=a;saveSession();ev.target.reset();setMsg(m,"Listo. La llave nueva quedó guardada.")}
+    catch(err){setMsg(m,err&&err.status===401?"La llave no es válida o venció.":err&&(err.status===403||err.status===404)?"Esa llave no puede escribir en este repositorio.":ghErr(err),true)} btn.disabled=false};
 }
 </script>
 </body></html>
