@@ -1,0 +1,27 @@
+{
+ "v": 2,
+ "owner": "esguillaro-ai",
+ "repo": "guias-pc-ia-2027",
+ "branch": "main",
+ "users": {
+  "Enzo": {
+   "salt": "DB87jzileWkBp/ROwsnY9A==",
+   "iter": 600000,
+   "iv": "DAiMeRWz5AllN9Py",
+   "ct": "oDVPvYECLfVCyTTnWNrEfZT5yHBBQAK5c3Ptwe7qsyaOkWoNSeCg1MeOzIFEXg16"
+  },
+  "Pedagogico": {
+   "salt": "rQk0h0KXUmXJx94WpmJ1TQ==",
+   "iter": 600000,
+   "iv": "VAUCsUHMRgIhCiTj",
+   "ct": "sFOTAL2Hdx3s3K2GOrgtTJhFXf067d8J/w+0i33QYAVcLPIRoOh28gUA/OX4EaEe"
+  },
+  "Ro": {
+   "salt": "cBInApsrmIS2wdq8ofb0Xg==",
+   "iter": 600000,
+   "iv": "z7r0HuXtijZg824V",
+   "ct": "++LK+W7SsRxL4xeXkdJu89SLDBrYfvOOpwZJgSo/XB1HoUxD7EIZSmcFFZiZZECb"
+  }
+ },
+ "token": null
+}

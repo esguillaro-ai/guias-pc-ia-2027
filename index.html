@@ -740,7 +740,7 @@ async function wrapUser(name,pass,K){const salt=rnd(16);return {salt:b64(salt),i
 function saveSession(){try{GH.auth?sessionStorage.setItem("gh-auth",JSON.stringify(GH.auth)):sessionStorage.removeItem("gh-auth")}catch(e){}}
 try{const a=sessionStorage.getItem("gh-auth");if(a)GH.auth=JSON.parse(a)}catch(e){}
 fetch("edicion.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(c=>{
-  if(c&&c.v===2&&c.users&&c.token)GH.cfg=c; else {GH.auth=null;saveSession()}
+  if(c&&c.v===2&&c.users)GH.cfg=c; else {GH.auth=null;saveSession()}
   if(!state.editing&&DATA.length)route(true);
 }).catch(()=>{});
 
@@ -749,7 +749,7 @@ async function ghLogin(name,pass){
   if(!key)throw {code:"cred"};
   const u=c.users[key];
   let K;try{K=await unseal(await pwKey(key,pass,unb64(u.salt),u.iter),u)}catch(e){throw {code:"cred"}}
-  const token=tdec.decode(await unseal(await aesKey(K),c.token));
+  const token=c.token?tdec.decode(await unseal(await aesKey(K),c.token)):null;
   return {name:key,token,K:b64(K),owner:c.owner,repo:c.repo,branch:c.branch};
 }
 async function ghCheck(token){
@@ -771,17 +771,20 @@ async function ghPut(path,text,message,sha,a=GH.auth){
   if(!r.ok)throw {status:r.status};
 }
 async function ghCommit(mutate,message){
+  if(!GH.auth||!GH.auth.token)throw {status:"notoken"};
   const f=await ghGet("guias.json"); if(!f)throw {status:404};
   const arr=JSON.parse(f.text); mutate(arr);
   await ghPut("guias.json","[\n"+arr.map(x=>JSON.stringify(x)).join(",\n")+"\n]\n",message,f.sha);
 }
 async function saveCfg(cfg,message,a=GH.auth){
+  if(!a||!a.token)throw {status:"notoken"};
   const cur=await ghGet("edicion.json",a);
   await ghPut("edicion.json",JSON.stringify(cfg,null,1)+"\n",message,cur&&cur.sha,a);
   GH.cfg=cfg;
 }
 function ghErr(e){
   const s=e&&e.status;
+  if(s==="notoken")return "Falta conectar la web con GitHub (una sola vez). Entrá a Edición, al pie del catálogo.";
   if(s===401)return "La llave de GitHub venció o fue revocada. Renovala en Edición → Renovar la llave de GitHub.";
   if(s===403||s===404)return "La llave de GitHub no tiene permiso para escribir en el repositorio.";
   if(s===409||s===422)return "El archivo cambió mientras editabas. Volvé a intentar.";
@@ -866,18 +869,29 @@ function renderAdmin(){
   app.innerHTML=`${viewNav("")}<div style="display:flex;flex-direction:column;gap:16px;max-width:600px">
     <section class="box"><h2>Edición activa · ${esc(GH.auth.name)}</h2><p>En cada propuesta vas a ver el botón <b>Editar secuencia</b>. Al guardar, la web se actualiza en 1 o 2 minutos.</p>
       <div class="ed-tools"><a class="btn" href="#">Ir a las propuestas</a><button class="btn-sec" type="button" id="lg-out">Salir de la edición</button></div></section>
+${GH.auth.token?`    <form class="box" id="cp"><h3>Cambiar una contraseña</h3>
+      <label class="fld" for="cp-u"><span>Usuario</span><select id="cp-u">${names.map(n=>`<option ${n===GH.auth.name?"selected":""}>${esc(n)}</option>`).join("")}</select></label>
+      <div class="ed-grid">${pwField("cp-p","Nueva contraseña")}${pwField("cp-q","Repetir contraseña")}</div>
+      <p id="cp-m" role="status" style="font-size:14px"></p>
+      <div><button class="btn-sec" type="submit">Cambiar contraseña</button></div></form>
+    <form class="box" id="rt" style="${GH.auth.token?"":"border:2px solid var(--accent)"}"><h3>${GH.auth.token?"Renovar la llave de GitHub":"Conectar con GitHub (una sola vez)"}</h3>
+      <p class="muted">${GH.auth.token?"Solo hace falta cuando la llave vence. Los usuarios y las contraseñas no cambian.":"Para que los cambios se guarden, GitHub exige una llave del repositorio. Se pega una sola vez acá y queda cifrada: después nadie la vuelve a pedir."}</p>
+      <label class="fld" for="rt-t"><span>Llave nueva</span><input id="rt-t" type="password" autocomplete="off" spellcheck="false" required></label>
+      ${tokenHelp}
+      <p id="rt-m" role="status" style="font-size:14px"></p>
+      <div><button class="btn-sec" type="submit">Guardar llave nueva</button></div></form>
+`:`    <form class="box" id="rt" style="${GH.auth.token?"":"border:2px solid var(--accent)"}"><h3>${GH.auth.token?"Renovar la llave de GitHub":"Conectar con GitHub (una sola vez)"}</h3>
+      <p class="muted">${GH.auth.token?"Solo hace falta cuando la llave vence. Los usuarios y las contraseñas no cambian.":"Para que los cambios se guarden, GitHub exige una llave del repositorio. Se pega una sola vez acá y queda cifrada: después nadie la vuelve a pedir."}</p>
+      <label class="fld" for="rt-t"><span>Llave nueva</span><input id="rt-t" type="password" autocomplete="off" spellcheck="false" required></label>
+      ${tokenHelp}
+      <p id="rt-m" role="status" style="font-size:14px"></p>
+      <div><button class="btn-sec" type="submit">Guardar llave nueva</button></div></form>
     <form class="box" id="cp"><h3>Cambiar una contraseña</h3>
       <label class="fld" for="cp-u"><span>Usuario</span><select id="cp-u">${names.map(n=>`<option ${n===GH.auth.name?"selected":""}>${esc(n)}</option>`).join("")}</select></label>
       <div class="ed-grid">${pwField("cp-p","Nueva contraseña")}${pwField("cp-q","Repetir contraseña")}</div>
       <p id="cp-m" role="status" style="font-size:14px"></p>
       <div><button class="btn-sec" type="submit">Cambiar contraseña</button></div></form>
-    <form class="box" id="rt"><h3>Renovar la llave de GitHub</h3>
-      <p class="muted">Solo hace falta cuando la llave vence. Los usuarios y las contraseñas no cambian.</p>
-      <label class="fld" for="rt-t"><span>Llave nueva</span><input id="rt-t" type="password" autocomplete="off" spellcheck="false" required></label>
-      ${tokenHelp}
-      <p id="rt-m" role="status" style="font-size:14px"></p>
-      <div><button class="btn-sec" type="submit">Guardar llave nueva</button></div></form>
-  </div>`;
+`}  </div>`;
   document.getElementById("lg-out").onclick=()=>{GH.auth=null;saveSession();location.hash=""};
   const K=unb64(GH.auth.K);
   document.getElementById("cp").onsubmit=async ev=>{ev.preventDefault();const m=document.getElementById("cp-m"),btn=ev.target.querySelector("button");
@@ -892,9 +906,9 @@ function renderAdmin(){
     const token=document.getElementById("rt-t").value.trim();btn.disabled=true;setMsg(m,"Verificando la llave…");
     try{const branch=await ghCheck(token);
       const cfg=JSON.parse(JSON.stringify(GH.cfg));cfg.branch=branch;cfg.token=await seal(await aesKey(K),tenc.encode(token));
-      const a={...GH.auth,token,branch};
-      await saveCfg(cfg,`Renovar la llave de GitHub (por ${GH.auth.name})`,a);
-      GH.auth=a;saveSession();ev.target.reset();setMsg(m,"Listo. La llave nueva quedó guardada.")}
+      const a={...GH.auth,token,branch},first=!GH.auth.token;
+      await saveCfg(cfg,`${first?"Conectar":"Renovar"} la llave de GitHub (por ${GH.auth.name})`,a);
+      GH.auth=a;saveSession();if(first){renderAdmin();return}ev.target.reset();setMsg(m,"Listo. La llave nueva quedó guardada.")}
     catch(err){setMsg(m,err&&err.status===401?"La llave no es válida o venció.":err&&(err.status===403||err.status===404)?"Esa llave no puede escribir en este repositorio.":ghErr(err),true)} btn.disabled=false};
 }
 </script>
