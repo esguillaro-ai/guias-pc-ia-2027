@@ -716,72 +716,8 @@ function enCrono(g){
   return out;
 }
 
-/* ---------- edición en GitHub Pages (usuario y contraseña) ---------- */
+/* Edición: se hace directamente en el repositorio (guias.json). */
 const GH={cfg:null,auth:null};
-const b64bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-function b64utf8(str){const bytes=new TextEncoder().encode(str);let bin="";for(let i=0;i<bytes.length;i+=0x8000)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(bin)}
-function utf8b64(b){const bin=atob(b.replace(/\s/g,""));return new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0)))}
-fetch("edicion.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(c=>{
-  if(!c||!c.data)return; GH.cfg=c;
-  try{const a=sessionStorage.getItem("gh-auth");if(a)GH.auth=JSON.parse(a)}catch(e){}
-  if(!state.editing&&DATA.length)route(true);
-}).catch(()=>{});
-async function ghUnlock(user,pass){
-  const c=GH.cfg,enc=new TextEncoder();
-  const km=await crypto.subtle.importKey("raw",enc.encode(user.trim().toLowerCase()+"\n"+pass),"PBKDF2",false,["deriveKey"]);
-  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:b64bytes(c.salt),iterations:c.iter,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["decrypt"]);
-  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64bytes(c.iv)},key,b64bytes(c.data));
-  return JSON.parse(new TextDecoder().decode(pt));
-}
-async function ghCommit(mutate,message){
-  const {token,owner,repo,branch}=GH.auth;
-  const api=`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/guias.json`;
-  const h={Authorization:`Bearer ${token}`,Accept:"application/vnd.github+json"};
-  const r=await fetch(api+"?ref="+encodeURIComponent(branch),{headers:h,cache:"no-store"});
-  if(!r.ok)throw {status:r.status};
-  const j=await r.json();
-  const arr=JSON.parse(utf8b64(j.content));
-  mutate(arr);
-  const p=await fetch(api,{method:"PUT",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({message,content:b64utf8(JSON.stringify(arr)),sha:j.sha,branch})});
-  if(!p.ok)throw {status:p.status};
-}
-function ghErr(e){
-  const s=e&&e.status;
-  if(s===401)return "La llave de escritura venció o fue revocada. Hay que generar una nueva con configurar.html.";
-  if(s===403||s===404)return "La llave de escritura no tiene permiso sobre el repositorio. Revisá la configuración.";
-  if(s===409)return "Alguien guardó al mismo tiempo. Volvé a intentar.";
-  return "No se pudo guardar. Revisá la conexión y volvé a intentar.";
-}
-async function ghSave(g,d,resp){
-  const pub={detalle:d,updatedAt:new Date().toISOString(),responsable:resp};
-  await ghCommit(arr=>{const x=arr.find(y=>y.id===g.id);if(x)x.publicado=pub},`Edición de ${g.nombre} por ${resp}`);
-  g.publicado=pub;g.detalle=d;g.ed={at:pub.updatedAt,name:resp};
-}
-async function ghRestore(g){
-  await ghCommit(arr=>{const x=arr.find(y=>y.id===g.id);if(x)delete x.publicado},`Restaurar ${g.nombre} a la versión de la guía`);
-  delete g.publicado;g.detalle=g.base;g.ed=null;
-}
-function renderLogin(){
-  if(GH.auth){
-    app.innerHTML=`${viewNav("")}<section class="box" style="max-width:460px"><h2>Acceso para edición</h2><p>Ya ingresaste. En cada propuesta vas a ver el botón <b>Editar secuencia</b>.</p><div class="ed-tools"><a class="btn" href="#">Ir a las propuestas</a><button class="btn-sec" type="button" id="lg-out">Salir</button></div></section>`;
-    document.getElementById("lg-out").onclick=()=>{GH.auth=null;try{sessionStorage.removeItem("gh-auth")}catch(e){}location.hash="";};
-    return;
-  }
-  if(!GH.cfg){app.innerHTML=`${viewNav("")}<section class="box" style="max-width:460px"><h2>Acceso para edición</h2><p class="muted">La edición todavía no está configurada en este sitio.</p></section>`;return}
-  app.innerHTML=`${viewNav("")}<form class="box" id="lg" style="max-width:420px" autocomplete="on">
-    <h2>Acceso para edición</h2>
-    <label class="fld" for="lg-u"><span>Usuario</span><input id="lg-u" type="text" autocomplete="username" required></label>
-    <label class="fld" for="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autocomplete="current-password" required></label>
-    <p class="msg" id="lg-m" role="status" style="font-size:14px"></p>
-    <div class="ed-tools"><button class="btn" type="submit" id="lg-b">Ingresar</button><a class="btn-sec" href="#">Cancelar</a></div>
-  </form>`;
-  const f=document.getElementById("lg"),m=document.getElementById("lg-m"),b=document.getElementById("lg-b");
-  f.onsubmit=async ev=>{ev.preventDefault();b.disabled=true;m.textContent="Verificando…";m.style.color="";
-    try{GH.auth=await ghUnlock(document.getElementById("lg-u").value,document.getElementById("lg-p").value);
-      try{sessionStorage.setItem("gh-auth",JSON.stringify(GH.auth))}catch(e){}
-      location.hash="";}
-    catch(e){b.disabled=false;m.textContent="Usuario o contraseña incorrectos.";m.style.color="#B3261E"}};
-  document.getElementById("lg-u").focus();
-}
+function renderLogin(){location.hash=''}
 </script>
 </body></html>

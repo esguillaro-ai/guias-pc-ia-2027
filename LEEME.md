@@ -1,38 +1,31 @@
-# Guías PC e IA 2027 — sitio para GitHub Pages
+# Guías PC e IA 2027
+
+Sitio público: https://esguillaro-ai.github.io/guias-pc-ia-2027/
 
 ## Archivos
 
 | Archivo | Para qué sirve |
 |---|---|
-| `index.html` | El sitio: catálogo, fichas, cronograma anual y editor. |
-| `guias.json` | Las 24 propuestas con sus secuencias. Las ediciones se guardan acá. |
+| `index.html` | El sitio: catálogo, fichas de cada propuesta y cronograma anual. |
+| `guias.json` | Las 24 propuestas con sus secuencias, roles y etapas. |
 | `cronograma.json` | El cronograma anual por grado. |
-| `configurar.html` | Herramienta para generar `edicion.json`. Se usa una vez (y cuando vence la llave). |
-| `edicion.json` | Lo generás vos con `configurar.html`. Contiene la llave de escritura **cifrada**. |
 
-## Puesta en marcha
+El sitio es de solo lectura: quienes lo visitan no pueden cambiar nada. Los cambios se hacen editando estos archivos en el repositorio, y solo quien tiene permiso de escritura sobre el repositorio puede guardarlos.
 
-1. **Crear el repositorio** en GitHub y subir `index.html`, `guias.json`, `cronograma.json` y `configurar.html` a la raíz.
-2. **Activar GitHub Pages:** *Settings → Pages → Build and deployment → Deploy from a branch*, rama `main`, carpeta `/ (root)`.
-3. **Crear la llave de escritura** (token fine-grained):
-   *Settings de tu cuenta → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token*.
-   - **Repository access:** *Only select repositories* → solo este repositorio.
-   - **Permissions → Repository permissions → Contents:** *Read and write*. Nada más.
-   - **Expiration:** la que prefieras (por ejemplo, un año).
-4. **Generar `edicion.json`:** abrí `configurar.html` (en el sitio publicado o en tu computadora), completá repositorio, rama, la llave, y el usuario y la contraseña de edición. Tocá *Generar* y descargá el archivo.
-5. **Subir `edicion.json`** a la raíz del repositorio. Si querés, borrá `configurar.html` del repositorio (podés conservar una copia local).
+## Cómo editar una secuencia
 
-## Cómo se edita
+1. Abrí `guias.json` en el repositorio y tocá el lápiz (*Edit this file*).
+2. Buscá la propuesta por su `"id"` (por ejemplo `"sobre-ruedas"`). Dentro de `"detalle"` → `"etapas"` está cada etapa con:
+   - `titulo`, `concepto`, `sintesisAula`, `sintesisVC`
+   - `aula` → `titulo`, `detalle`, `minimos`, `optimos`
+   - `vc` → `titulo`, `desafio`, `momentos` (cada uno con `nombre`, `min`, `texto`)
+   - `conjuntas`, `da`, `drNecesita` (decisiones del DA y del DR)
+   - `registro`, `yapa`
+   - `extraVC` (semanas extra de VC) y `opcional` (`true` si la etapa es opcional)
+3. Guardá con *Commit changes*. La web se actualiza en 1 o 2 minutos.
 
-- Al pie del catálogo aparece **Acceso para edición**. Con el usuario y la contraseña correctos, cada propuesta muestra **Editar secuencia**.
-- Al guardar, el sitio hace un *commit* en `guias.json`. La web pública muestra el cambio en 1 o 2 minutos.
-- **Restaurar la versión de la guía** vuelve a lo extraído de los PDF (la versión original queda siempre guardada en el archivo).
-- El acceso dura mientras la pestaña esté abierta. Para salir: *Acceso para edición → Salir*.
+Cuidá que el archivo siga siendo JSON válido: comillas dobles, comas entre elementos y sin coma después del último. Si algo se rompe, en la pestaña *History* del archivo se puede volver a la versión anterior.
 
-## Seguridad, en corto
+## Cómo editar el cronograma
 
-- En el repositorio no queda escrito ni el usuario ni la contraseña; solo la llave cifrada con ellos (AES-256 con PBKDF2, 600.000 iteraciones).
-- Sin usuario y contraseña, nadie puede guardar cambios, aunque lea todo el código.
-- Usá una contraseña larga que no uses en otro lado. Quien copie `edicion.json` podría intentar adivinarla sin límite de intentos; una contraseña larga lo hace impráctico.
-- Si la contraseña se filtra: revocá la llave en GitHub y generá un `edicion.json` nuevo con otra contraseña.
-- Cuando la llave vence, el editor avisa al guardar. Repetí los pasos 3 a 5.
+Abrí `cronograma.json`. Cada nivel tiene `filas` (los grados) y `segs` (los bloques). Cada bloque indica la fila (`r`), la columna de inicio (`c`, contando desde 0 = marzo semana 3), cuántas columnas ocupa (`s`), el tipo (`t`: `prop`, `rep` para 〃, `ext` para *, `pres`, `vac`, `bp`, `ba`, `pa`, `cierre`), el texto (`txt`) y el color (`rosa`, `lila`, `violeta`, `azul`).
